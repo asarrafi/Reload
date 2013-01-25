@@ -188,6 +188,8 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
 @interface ClientAppDelegate : NSObject {
     NSTask *task;
     NSTextView *theTextView;
+    pthread_mutex_t mutex;
+    BOOL mServerStatus;
 }
 - (void)createApp:(id)object;
 - (IBAction)testGetSource:(id)sender;
@@ -214,6 +216,19 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
 @end
 
 @implementation ClientAppDelegate
+- (BOOL) getServerStatus {
+    BOOL serverStatus;
+    pthread_mutex_lock(&mutex);
+    serverStatus = mServerStatus;
+    pthread_mutex_unlock(&mutex);
+    return serverStatus;
+}
+
+-(void) setServerStatus: (BOOL) status{
+    pthread_mutex_lock(&mutex);
+    mServerStatus = status;
+    pthread_mutex_unlock(&mutex);
+}
 
 - (void)receivedData:(NSNotification *)notif {
     try {
@@ -249,13 +264,18 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
 
 - (void)startTheBackgroundJob {
     try {
+        NSRect screen_rect = [[NSScreen mainScreen] visibleFrame];
+
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-        NSRect windowRect = NSMakeRect(0.0f, 0.0f, 600.0f, 400.0f);
+        NSRect windowRect = NSMakeRect(screen_rect.size.width*3/4, screen_rect.size.height-600.0f, screen_rect.size.width/5, 400.0f);
         
         NSWindow *window = [[NSWindow alloc] initWithContentRect:windowRect
-                                                       styleMask:(NSTitledWindowMask | NSResizableWindowMask | NSClosableWindowMask)
+                                                       styleMask:(NSTitledWindowMask)
                                                          backing:NSBackingStoreBuffered defer:NO];
-        
+        NSPoint p = NSMakePoint(screen_rect.size.width*3/4, screen_rect.size.height-600);
+        [window setFrameTopLeftPoint:p];
+        [window setTitle:@"Reload Server Log"];
+        [window orderFront:nil];
         [window setBackgroundColor:[NSColor blackColor]];
         
         [window makeKeyAndOrderFront:nil];
@@ -309,6 +329,7 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
         [file readInBackgroundAndNotify];
 
         [task launch];
+        [self setServerStatus:YES];
         [task waitUntilExit];
             
         
@@ -324,26 +345,27 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
    }
 // Create the application on the UI thread.
 - (void)createApp:(id)object {
+    
   [NSApplication sharedApplication];
   [NSBundle loadNibNamed:@"MainMenu" owner:NSApp];
   // Set the delegate for application events.
   [NSApp setDelegate:self];
-  
+  pthread_mutex_init(&mutex, NULL);
   // Add the Tests menu.
-
+    [self setServerStatus:NO];
   
   // Create the delegate for control and browser window events.
   ClientWindowDelegate* delegate = [[ClientWindowDelegate alloc] init];
+    
+    //Start Reload server
     [NSThread detachNewThreadSelector:@selector(startTheBackgroundJob) toTarget:self withObject:nil];
-    [NSThread sleepForTimeInterval:1];
-  
+
   // Create the main application window.
   NSRect screen_rect = [[NSScreen mainScreen] visibleFrame];
  //  NSRect window_rect = { {0, screen_rect.size.height - kWindowHeight},{kWindowWidth, kWindowHeight} };
   NSWindow* mainWnd = [[UnderlayOpenGLHostingWindow alloc]
                        initWithContentRect:screen_rect
                        styleMask:(NSTitledWindowMask |
-                                  NSClosableWindowMask |
                                   NSMiniaturizableWindowMask |
                                   NSResizableWindowMask )
                        backing:NSBackingStoreBuffered
@@ -371,7 +393,12 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
   // Populate the settings based on command line arguments.
   AppGetBrowserSettings(settings);
 
-  window_info.SetAsChild(contentView, 0, 0, screen_rect.size.width, screen_rect.size.height - URLBAR_HEIGHT);
+  window_info.SetAsChild(contentView, 0, 0, screen_rect.size.width*3/4, screen_rect.size.height - URLBAR_HEIGHT);
+    while (([self getServerStatus] == NO)) {
+        [NSThread sleepForTimeInterval:1];
+    }
+    
+    
   CefBrowserHost::CreateBrowser(window_info, g_handler.get(),
                                 g_handler->GetStartupURL(), settings);
 
@@ -380,7 +407,7 @@ NSButton* MakeButton(NSRect* rect, NSString* title, NSView* parent) {
 
   // Size the window.
   NSRect r = [mainWnd contentRectForFrameRect:[mainWnd frame]];
-  r.size.width = screen_rect.size.width;
+  r.size.width = screen_rect.size.width*3/4;
   r.size.height = screen_rect.size.height + URLBAR_HEIGHT;
   [mainWnd setFrame:[mainWnd frameRectForContentRect:r] display:YES];
 }
