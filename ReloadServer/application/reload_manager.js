@@ -12,6 +12,52 @@ var http = require('http');
 
 var vars = require('./globals');
 
+/**
+ * Send a given message to all connected clients.
+ * @param jsonMessage Message in JSON format.
+ * The message must contain a field named 'message'
+ * with the message name.
+ */
+var sendToAllClients = function(jsonMessage) {
+
+    // TODO: What about a client list object that has a send
+    // method in it and other methods for managing the client list.
+    // And a client object instaed of using bare socket objects.
+    vars.globals.clientList.forEach(function (client) {
+
+        try {
+            // Protocol consists of header "RELOADMSG" followed
+            // by data length encoded as 8 hex didgits, e.g.: "000000F0"
+            // Then string data follows with actual JSON message.
+            // Advantage with hex is that we can read fixed numer of bytes
+            // in the read operation.
+            // Convert to hex:
+            // http://stackoverflow.com/questions/57803/how-to-convert-decimal-to-hex-in-javascript
+
+            // Construct message with proper header.
+            var message = JSON.stringify(jsonMessage);
+            var fullMessage = "RELOADMSG" + self.toHex8Byte(message.length) + message;
+
+            // Send the message.
+            // TODO: Perhaps make client object that wraps the base socket and
+            // put a send/write method in there.
+            var result = client.write(fullMessage, "ascii");
+        }
+        catch (err) {
+            console.log("@@@ reload_manager.js: sendToAllClients error: " + err)
+
+            // Remove this client from the list since we have problems with it.
+            var index = vars.globals.clientList.indexOf(client);
+            if (index != -1)
+            {
+                vars.globals.clientList.splice(index, 1);
+            }
+        }
+    });
+};
+
+// TODO: Move non-RPC functions out of this object to make the code
+// mode clean and make rpcFunctions contain only the RPC functions.
 var rpcFunctions = {
 
     /**
@@ -160,77 +206,89 @@ var rpcFunctions = {
         //check if parameter passing was correct
         if(typeof sendResponse !== 'function') return false;
 
-        try {
-            console.log(
-                "Creating new project: " + projectName +
-                ", of type " + projectType);
+        var self = this;
 
-            var templateName = "ReloadTemplate";
-            if (projectType)
-            {
-                if (projectType == "native")
-                {
-                    templateName = "NativeUITemplate";
+        // check if directory exists
+        fs.exists( vars.globals.rootWorkspacePath +
+                   vars.globals.fileSeparator +
+                   projectName, function (exists) {
+            if(exists) {
+                sendResponse({hasError: true, data: "Error in createNewProject: Project already exists."});
+            }
+            else {
+                try {
+                    console.log(
+                        "Creating new project: " + projectName +
+                        ", of type " + projectType);
+
+                    var templateName = "ReloadTemplate";
+                    if (projectType)
+                    {
+                        if (projectType == "native")
+                        {
+                            templateName = "NativeUITemplate";
+                        }
+                        else
+                        {
+                            templateName = "ReloadTemplate";
+                        }
+                    }
+
+                    var exec = require('child_process').exec;
+
+                    function resultCommand(error, stdout, stderr) {
+                        console.log("stdout: " + stdout);
+                        console.log("stderr: " + stderr);
+                        if (error)
+                        {
+                            console.log("error: " + error);
+                        }
+
+                        var projectData = fs.readFileSync(vars.globals.rootWorkspacePath +
+                                                          vars.globals.fileSeparator +
+                                                          projectName +
+                                                          vars.globals.fileSeparator +
+                                                          ".project", 'utf8');
+
+                        //TODO: Very bad way to change the project name in file
+                        var newData = projectData.replace(templateName, projectName);
+
+                        fs.writeFileSync(vars.globals.rootWorkspacePath +
+                                         vars.globals.fileSeparator +
+                                         projectName +
+                                         vars.globals.fileSeparator +
+                                         ".project", newData    , 'utf8');
+
+                        sendResponse({hasError: false, data: projectName});
+                    }
+
+                    if((vars.globals.localPlatform.indexOf("darwin") >= 0) ||(vars.globals.localPlatform.indexOf("linux") >=0))
+                    {
+                        var command = "cp -r " + self.fixPathsUnix(vars.globals.currentWorkingPath) +
+                                                 "/templates/" +
+                                                 self.fixPathsUnix(templateName) +
+                                           " " + self.fixPathsUnix(vars.globals.rootWorkspacePath) +
+                                                 self.fixPathsUnix(vars.globals.fileSeparator) +
+                                                 self.fixPathsUnix(projectName);
+                    }
+                    else
+                    {
+                        var command = "xcopy /e /I \"" + vars.globals.currentWorkingPath +
+                                                         "\\templates\\" + templateName +
+                                               "\" \"" + vars.globals.rootWorkspacePath +
+                                                         vars.globals.fileSeparator +
+                                                         projectName + "\"";
+                    }
+                    console.log("Command: " + command);
+                    exec(command, resultCommand);
                 }
-                else
+                catch(err)
                 {
-                    templateName = "ReloadTemplate";
+                    console.log("Error in createNewProject: " + err);
+                    sendResponse({hasError: true, data: "Error in createNewProject: " + err});
                 }
             }
-
-            var exec = require('child_process').exec;
-
-            function resultCommand(error, stdout, stderr) {
-                console.log("stdout: " + stdout);
-                console.log("stderr: " + stderr);
-                if (error)
-                {
-                    console.log("error: " + error);
-                }
-
-                var projectData = fs.readFileSync(vars.globals.rootWorkspacePath +
-                                                  vars.globals.fileSeparator +
-                                                  projectName +
-                                                  vars.globals.fileSeparator +
-                                                  ".project", 'utf8');
-
-                //TODO: Very bad way to change the project name in file
-                var newData = projectData.replace(templateName, projectName);
-
-                fs.writeFileSync(vars.globals.rootWorkspacePath +
-                                 vars.globals.fileSeparator +
-                                 projectName +
-                                 vars.globals.fileSeparator +
-                                 ".project", newData    , 'utf8');
-
-                sendResponse({hasError: false, data: projectName});
-            }
-
-            if((vars.globals.localPlatform.indexOf("darwin") >= 0) ||(vars.globals.localPlatform.indexOf("linux") >=0))
-            {
-                var command = "cp -r " + this.fixPathsUnix(vars.globals.currentWorkingPath) +
-                                         "/templates/" +
-                                         this.fixPathsUnix(templateName) +
-                                   " " + this.fixPathsUnix(vars.globals.rootWorkspacePath) +
-                                         this.fixPathsUnix(vars.globals.fileSeparator) +
-                                         this.fixPathsUnix(projectName);
-            }
-            else
-            {
-                var command = "xcopy /e /I \"" + vars.globals.currentWorkingPath +
-                                                 "\\templates\\" + templateName +
-                                       "\" \"" + vars.globals.rootWorkspacePath +
-                                                 vars.globals.fileSeparator +
-                                                 projectName + "\"";
-            }
-            console.log("Command: " + command);
-            exec(command, resultCommand);
-        }
-        catch(err)
-        {
-            console.log("Error in createNewProject: " + err);
-            sendResponse({hasError: true, data: "Error in createNewProject: " + err});
-        }
+        });
     },
 
     /**
@@ -435,15 +493,13 @@ var rpcFunctions = {
     reloadProject: function (projectPath, debug, sendResponse) {
 
         //check if parameter passing was correct
-        if(typeof sendResponse !== 'function') return false;
-
-        var self = this;
+        if (typeof sendResponse !== 'function') return false;
 
         var weinreDebug;
         console.log("-----------------------------------------------");
         console.log("-                 R e l o a d                 -");
         console.log("-----------------------------------------------");
-        if( typeof debug !== "boolean" || typeof debug === "undefined") {
+        if (typeof debug !== "boolean" || typeof debug === "undefined") {
             weinreDebug = false;
         }
         else {
@@ -455,19 +511,32 @@ var rpcFunctions = {
         sendResponse({hasError: false, data: ""});
 
         // Bundle the app.
-        this.bundleApp(projectPath, weinreDebug, function (actualPath) {
+        this.bundleApp(projectPath, weinreDebug, function(actualPath) {
 
+            // We will send the file size information together with
+            // the command as an extra level of integrity checking.
+            var data = fs.readFileSync(actualPath);
+            var url = projectPath.replace(
+                "LocalFiles.html",
+                "LocalFiles.bin").replace(
+                    ' ',
+                    '%20');
 
-            // We will send the file size information together with the command as
-            // an extra level of integrity checking.
             console.log("---------- S e n d i n g   B u n d l e --------");
             console.log("actualPath: " + actualPath);
-            var data = fs.readFileSync(actualPath);
-            var url = projectPath.replace("LocalFiles.html", "LocalFiles.bin").replace(' ', '%20');
+            console.log("url: " + url + "?filesize=" + data.length);
 
-            //send the new bundle URL to the device clients
-            vars.globals.clientList.forEach(function (client){
+            // Send the new bundle URL to the device clients.
+            sendToAllClients({
+                message: 'ReloadBundle',
+                url: url,
+                fileSize: data.length
+            });
 
+            // Statistics
+            vars.methods.loadStats(function (statistics) {
+                statistics.reloads += 1;
+                vars.methods.saveStats(statistics);
                 console.log("url: " + url + "?filesize=" + data.length);
                 try {
                     // Protocol consists of header "RELOADMSG" followed
@@ -491,11 +560,31 @@ var rpcFunctions = {
                     console.log('message: ' + fullMessage);
                     console.log("-----------------------------------------------");
 
-                    // Statistics
-                    vars.methods.loadStats(function (statistics) {
-                        statistics.reloads += 1;
-                        vars.methods.saveStats(statistics);
-                    });
+                    // Collect Stats Statistics
+                    if(vars.globals.statistics === true) {
+                        var indexPath = vars.globals.rootWorkspacePath +
+                                        vars.globals.fileSeparator + projectPath +
+                                        vars.globals.fileSeparator + "LocalFiles" +
+                                        vars.globals.fileSeparator + "index.html";
+
+                        var indexFileData = String(fs.readFileSync(indexPath, "utf8"));
+                        
+                        $ = cheerio.load(indexFileData,{
+                            lowerCaseTags: false
+                        });
+                        var nativeUIProject = $("#NativeUI");
+                        vars.methods.loadStats(function (statistics) {
+
+                            if(nativeUIProject.length) {
+                                statistics.totalReloadsNative += 1;
+                            } else {
+                                statistics.totalReloadsHTML += 1;
+                            }
+                            
+                            statistics.lastActivityTS = new Date().getTime();
+                            vars.methods.saveStats(statistics);
+                        });
+                    }
                 }
                 catch(err) {
                     console.log("error     : " + err)
@@ -506,6 +595,22 @@ var rpcFunctions = {
                     }
                 }
             });
+        });
+    },
+
+    /**
+     * (RPC): Evaluate JS on the clients.
+     */
+    evalJS: function (script, sendResponse) {
+        if(typeof sendResponse !== 'function') return false;
+        console.log("@@@ ====================================");
+        console.log("@@@ evalJS " + script);
+        //console.log("@@@ Callstack:");
+        //console.log(new Error("CallStack").stack);
+        sendResponse({hasError: false, data: "ok"});
+        sendToAllClients({
+            message: 'EvalJS',
+            script: script
         });
     },
 
@@ -765,11 +870,10 @@ var rpcFunctions = {
         var unescapedLogArray = [];
         vars.globals.gRemoteLogData.forEach(function (element, index, self){
             unescapedLogArray[index] = unescape(element);
-            console.log(element);
         });
 
         var dataString  = JSON.stringify(unescapedLogArray);
-        console.log(dataString);
+        
         vars.globals.gRemoteLogData = [];
 
         sendResponse({hasError: false, data: dataString});
@@ -793,7 +897,7 @@ var rpcFunctions = {
         }
 
         var postData = JSON.stringify( { feedback : text });
-        
+
         var requestOptions = vars.globals.feedbackRequestOptions;
 
         requestOptions.headers = {
@@ -811,7 +915,7 @@ var rpcFunctions = {
             } else {
                 sendResponse({hasError: true, data: "Error in processing feedback"});
             }
-            
+
             res.setEncoding('utf8');
             res.on('error', function (){
                 sendResponse({hasError: true, data: "Error in processing feedback"});
@@ -831,47 +935,52 @@ var rpcFunctions = {
         postRequest.end();
     },
 
-    /** 
+    /**
      * (RPC and Internal) Used to send the feedback data if there are any
      */
     sendStats: function (sendResponse) {
-        
+
         vars.methods.loadStats( function(statistics){
-            
+
             if( statistics.clients.length === 0 ) {
+                respond(false, "Nothing to Send");
                 return;
             }
 
             var postData = JSON.stringify(statistics);
-        
+
             var requestOptions = vars.globals.statsRequestOptions;
             requestOptions.headers = {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded',
                 'Content-Length': postData.length
             };
 
             // Set up the request
             var postRequest = http.request(requestOptions, function(res) {
 
-                var responseText = "";
+                var responseText = "",
+                    startTS = new Date().getTime();
+
                 if(res.statusCode == 200) {
                     vars.methods.loadStats(function (statistics) {
-                        statistics.reloads = 0;
+                        statistics.totalReloadsNative = 0;
+                        statistics.totalReloadsHTML = 0;
+                        statistics.serverStartTS = startTS;
+                        statistics.lastActivityTS = startTS;
                         statistics.clients = [];
                         vars.methods.saveStats(statistics);
                     });
 
                     //if it is an RPC call
-                    if(typeof sendResponse === 'function') {
-                        sendResponse({hasError: false, data: true});
-                    }
+                    respond(false, "Statistics Sent");
+                    
+                } else {
+                    respond(true, "Status Code: " + res.statusCode);
                 }
-                
+
                 res.setEncoding('utf8');
                 res.on('error', function (){
-                    if(typeof sendResponse === 'function') {
-                        sendResponse({hasError: true, data: "Error in processing feedback"});
-                    }
+                    respond(true, "Error in processing feedback");
                 });
                 res.on('data', function (chunk) {
 
@@ -880,10 +989,7 @@ var rpcFunctions = {
             });
 
             postRequest.on('error', function(e) {
-                console.log('Could not establish connection with MoSync: ' + e.message);
-                if(typeof sendResponse === 'function') {
-                        sendResponse({hasError: true, data: 'Could not establish connection with MoSync: ' + e.message});
-                }
+                respond(true, 'Could not establish connection with MoSync: ' + e.message);                
             });
             // post the data
             postRequest.write(postData);
@@ -923,6 +1029,57 @@ var rpcFunctions = {
 
             sendResponse({hasError: false, data: newWorkspacePath});
         }
+    },
+
+    /**
+     * (RPC): Sets a configuration option to specified value
+     */
+    setConfig: function (option, value, sendResponse ) {
+        //check if parameter passing was correct
+        var config = {};
+        if(typeof sendResponse !== 'function') return false;
+
+        fs.readFile(process.cwd() + vars.globals.fileSeparator + "config.dat", 
+                    "utf8", 
+                    function(err, data){
+                        //console.log(data);
+                        if (err) throw err;
+
+                        config = JSON.parse(data);
+                        config[option] = value;
+
+                        fs.writeFile( process.cwd() + vars.globals.fileSeparator + "config.dat",
+                                      JSON.stringify(config),
+                                      "utf8", 
+                                      function(err, data){
+                                        if (err) throw err;
+
+                                        //set the configuration var
+                                        vars.globals[option] = value;
+
+                                        sendResponse({hasError: false, data: true});
+                                    });
+                    });
+    },
+    
+    /**
+     * (RPC): Gets a configuration option's value
+     */
+    getConfig: function (option, sendResponse ) {
+        //check if parameter passing was correct
+        var config = {};
+        if(typeof sendResponse !== 'function') return false;
+
+        fs.readFile(process.cwd() + vars.globals.fileSeparator + "config.dat", 
+                    "utf8", 
+                    function(err, data){
+                        console.log(data);
+                        if (err) throw err;
+
+                        config = JSON.parse(data);
+
+                        sendResponse({hasError: false, data: config[option]});
+                    });
     },
 
     /**
@@ -1041,10 +1198,11 @@ var rpcFunctions = {
         /**
          * Get all embeded script tags
          */
+
         var embededScriptTags = $("script:not([class='jsdom']):not([src])").each( function (index, element) {
             $(this).html("try {  eval(unescape(\"" +
-                                escape($(this).html()) +
-                            "\"));  } catch (e) { mosync.rlog(e.toString()); };");
+                                escape("try {" + $(this).html() + "} catch(w) { mosync.rlog(w.toString()); }") +
+                            "\"));  } catch (e) { mosync.rlog(e.stack); };");
         });
         console.log("--Debug Feature-- There was: " + embededScriptTags.length + " embeded JS scripts found.");
 
@@ -1066,8 +1224,9 @@ var rpcFunctions = {
                     if( s.isFile() ) {
                         var jsFileData = String(fs.readFileSync(scriptPath, "utf8"));
 
-                        jsFileData = "try { eval(unescape(\"" + escape(jsFileData) +
-                                      "\"));  } catch (e) { mosync.rlog(e.toString()); };";
+                        jsFileData = "try { eval(unescape(\"" + 
+                                        escape("try {" + jsFileData + "} catch(w) { mosync.rlog(w.toString()); }") +
+                                      "\"));  } catch (e) { 'EX' + mosync.rlog(e.toString()); };";
                         fs.writeFileSync(scriptPath, jsFileData, "utf8");
                     }
                 } catch (e) {
@@ -1085,7 +1244,7 @@ var rpcFunctions = {
          */
         var attrs = ["onclick", "onevent", "onload"];    // Attribute list
         var inlineJsCode = $("div,body").each(function (index, element){
-            
+
             for( var i in element.attribs ) {
 
                 for( var j = 0; j < attrs.length; j++) {
@@ -1095,27 +1254,31 @@ var rpcFunctions = {
                         var inlineCode = $(this).attr(i);
 
                         $(element).attr(i, "try { eval(unescape(\"" +
-                                                    escape(inlineCode) +
-                                                    "\"));  } catch (e) { mosync.rlog(e.toString()); };");
+                                                    escape("try {" + inlineCode + "} catch(w) { mosync.rlog(w.toString()); }") +
+                                                    "\"));  } catch (e) { mosync.rlog('I' + e.toString()); };");
                     }
                 }
             }
-        }); 
+        });
         console.log("--Debug Feature-- There was: " + inlineJsCode.length + " inline JS scripts found.");
-        
+
          /**
           * Write index.html file
           */
         fs.writeFileSync(indexHtmlPath, $.html(), "utf8");
 
         callback();
-	}
+    }
 };
 
 // These functions are called for initialization
 rpcFunctions.getVersionInfo(function (a){});
 rpcFunctions.getLatestPath();
 rpcFunctions.getNetworkIP();
-rpcFunctions.sendStats();
+vars.methods.loadConfig(function () {
+    if(vars.globals.statistics) {
+        rpcFunctions.sendStats();
+    }
+});
 
 rpc.exposeModule('manager', rpcFunctions);

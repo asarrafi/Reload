@@ -1,5 +1,6 @@
 var vars = require('../application/globals'),
 	fs = require('fs');
+
 /**
  * Object that accumulates data sent over a streaming
  * protocol (TCP).
@@ -125,6 +126,13 @@ var create = function (port) {
         });
 
         vars.globals.deviceInfoListJSON = JSON.stringify(infoListJSON);
+
+        // Dispatch list of clients to WebUI through WebSockets.
+        var md = vars.MsgDispatcher;
+        md.dispatch({
+            target: 'devices',
+            msg: infoListJSON
+        });
     }
 
     /**
@@ -145,32 +153,27 @@ var create = function (port) {
             {
                 // Platform, name, uuid, os version, phonegap version.
                 //message.type == null;
-                // Statistics Collection
-				vars.methods.loadStats(function (statistics) {
+                if(vars.globals.statistics === true) {
 
-					var deviceExists = false;
+                    // Statistics Collection
+                    vars.methods.loadStats(function (statistics) {
 
-					for( var i in statistics.clients) {
-						if( statistics.clients[i].uuid == message.params.uuid) {
-							deviceExists = true;
-						}
-					}
-					console.log(message.params);
-					if( !deviceExists ) {
+                        var actionTS = new Date().getTime();
+                        
+                        var client = {
+                            localIP: socket.remoteAddress,
+                            platform: message.params.platform,
+                            version: message.params.version,
+                            action: "connect",
+                            actionTS : actionTS
+                        };
 
-							var client = {
-								platform: message.params.platform,
-								version: message.params.version,
-								name: message.params.name,
-								uuid: message.params.uuid,
-								phonegap: message.params.phonegap
-							};
-
-							statistics.clients.push(client);
-
-							vars.methods.saveStats(statistics);
-					}
-				});
+                        statistics.clients.push(client);
+                        
+                        vars.methods.saveStats(statistics);
+                    });
+                }
+                
                 socket.deviceInfo = message.params;
                 socket.deviceInfo.address = socket.remoteAddress;
                 generateDeviceInfoListJSON();
@@ -184,6 +187,13 @@ var create = function (port) {
                 // TODO: Use a function for this rather than
                 // accessing global data directly.
                 vars.globals.gRemoteLogData.push(message.params);
+
+                // Dispatch log message to WebUI through WebSockets.
+                var md = vars.MsgDispatcher;
+                md.dispatch({
+                    target: 'log',
+                    msg: unescape(unescape(message.params))
+                });
             }
         }
     }
@@ -205,6 +215,26 @@ var create = function (port) {
                 if (socket.deviceInfo != undefined)
                 {
                     address = socket.deviceInfo.address;
+
+                    // Statistics Collection
+                    if(vars.globals.statistics === true) {
+                        vars.methods.loadStats(function (statistics) {
+
+                            var actionTS = new Date().getTime();
+
+                            var disconnectedClient = {
+                                localIP: address,
+                                platform: socket.deviceInfo.platform,
+                                version: socket.deviceInfo.version,
+                                action: "disconnect",
+                                actionTS : actionTS
+                            };
+
+                            statistics.clients.push(disconnectedClient);
+                            //console.log(statistics);
+                            vars.methods.saveStats(statistics);
+                        });
+                    }
                 }
 
                 console.log(
@@ -248,7 +278,7 @@ var create = function (port) {
         }
     }
 
-    console.log("Opening TPC socket on port: " + port);
+    console.log("Opening TCP socket on port: " + port);
     var server = net.createServer(saveClient);
     server.listen(7000);
 
