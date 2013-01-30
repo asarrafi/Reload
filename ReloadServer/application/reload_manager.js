@@ -495,6 +495,8 @@ var rpcFunctions = {
         //check if parameter passing was correct
         if (typeof sendResponse !== 'function') return false;
 
+        var self = this;
+
         var weinreDebug;
         console.log("-----------------------------------------------");
         console.log("-                 R e l o a d                 -");
@@ -533,10 +535,6 @@ var rpcFunctions = {
                 fileSize: data.length
             });
 
-            // Statistics
-            vars.methods.loadStats(function (statistics) {
-                statistics.reloads += 1;
-                vars.methods.saveStats(statistics);
                 console.log("url: " + url + "?filesize=" + data.length);
                 try {
                     // Protocol consists of header "RELOADMSG" followed
@@ -594,6 +592,10 @@ var rpcFunctions = {
                         vars.globals.clientList.splice(index, 1);
                     }
                 }
+            // Statistics
+            vars.methods.loadStats(function (statistics) {
+                statistics.reloads += 1;
+                vars.methods.saveStats(statistics);
             });
         });
     },
@@ -940,6 +942,18 @@ var rpcFunctions = {
      */
     sendStats: function (sendResponse) {
 
+        function respond( error, message) {
+            if(typeof sendResponse === 'function') {
+                sendResponse({hasError: error, data: message});
+            }
+            console.log(message);
+        };
+
+        if (!vars.globals.statistics) {
+            respond(true, "Sending Statistics is not enabled.");
+            return;
+        }
+        
         vars.methods.loadStats( function(statistics){
 
             if( statistics.clients.length === 0 ) {
@@ -947,8 +961,8 @@ var rpcFunctions = {
                 return;
             }
 
-            var postData = JSON.stringify(statistics);
-
+            var postData = "data=" + escape(JSON.stringify(statistics));
+        
             var requestOptions = vars.globals.statsRequestOptions;
             requestOptions.headers = {
                 'Content-Type': 'application/x-www-form-urlencoded',
