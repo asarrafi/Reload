@@ -32,8 +32,8 @@ MA 02110-1301, USA.
 #include "ReloadClient.h"
 #include "ReloadNativeUIMessageHandler.h"
 #include "Log.h"
-#include "View/MainStackSingleton.h"
-#include "View/MainStackScreen.h"
+#include "MainStackSingleton.h"
+#include "MainStackScreen.h"
 
 #define SERVER_TCP_PORT "7000"
 #define SERVER_HTTP_PORT "8283"

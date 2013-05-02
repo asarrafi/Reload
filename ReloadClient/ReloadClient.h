@@ -39,7 +39,7 @@ MA 02110-1301, USA.
 
 
 #include "ReloadScreenController.h"
-#include "View/LoadingScreen.h"
+#include "LoadingScreen.h"
 #include "SocketHandler.h"
 #include "DownloadHandler.h"
 #include "MAHeaders.h"

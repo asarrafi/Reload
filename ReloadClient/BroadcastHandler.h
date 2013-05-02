@@ -33,7 +33,7 @@ MA 02110-1301, USA.
 #include <MAUtil/String.h>
 #include <MAUtil/Vector.h>
 #include <MAUtil/Connection.h>
-#include "View/ServersDialog.h"
+#include "ServersDialog.h"
 
 //class LoginScreen;
 
